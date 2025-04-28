@@ -97,12 +97,8 @@ else
 			return nil
 		end
 		local _type = msg.type
-		local _condition = not (functionHandlers[_type] ~= nil)
-		if _condition then
-			_condition = msg.ignoreUnset ~= true
-		end
-		if _condition then
-			return warn(`[BRIDGE] No function registered for {msg.type} on client`)
+		if not (functionHandlers[_type] ~= nil) then
+			return if msg.ignoreUnset ~= true then warn(`[BRIDGE] No function registered for {msg.type} on client`) else nil
 		end
 		local _type_1 = msg.type
 		return functionHandlers[_type_1](msg.data, player)
