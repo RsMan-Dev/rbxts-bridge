@@ -8,7 +8,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": ["roblox", "typescript", "bridge", "sync", "communication"],
-  "author": "RsMan",
+  "author": "RsMan-Dev",
   "license": "MIT",
   "description": "A simple and efficient way to share data between server and client in Roblox",
   "types": "out/index.d.ts",
