@@ -70,7 +70,7 @@ if (RunService.IsServer()) {
   remoteFunction.OnClientInvoke = jsonMessage => {
     const msg = unwrapMsg(jsonMessage);
     if (msg === undefined) return;
-    if (!functionHandlers.has(msg.type) && msg.ignoreUnset !== true) return warn(`[BRIDGE] No function registered for ${msg.type} on client`);
+    if (!functionHandlers.has(msg.type)) return msg.ignoreUnset !== true ? warn(`[BRIDGE] No function registered for ${msg.type} on client`) : undefined;
     return functionHandlers.get(msg.type)!(msg.data, player);
   }
 }
