@@ -21,13 +21,17 @@ This lib aims to have one single interface for both server and client, so you ca
 
 ## Installation
 
-Currently available through GitHub:
+Currently available through GitHub (to get the latest commited build, ensure using commit hash for stability):
 
 ```bash
 npm install @rbxts/bridge@github:RsMan-Dev/rbxts-bridge
 ```
 
-> Note: NPM package coming soon!
+Via NPM:
+
+```bash
+npm install @rbxts/bridge
+```
 
 ## Features
 
