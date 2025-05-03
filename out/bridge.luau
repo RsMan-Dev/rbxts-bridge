@@ -113,7 +113,7 @@ local function throttle(callback, delay)
 	local timeout = nil
 	return { function(...)
 		local args = { ... }
-		if timeout ~= 0 and timeout == timeout and timeout ~= "" and timeout then
+		if timeout then
 			lastArgs = args
 			return lastArgs
 		end
@@ -126,7 +126,7 @@ local function throttle(callback, delay)
 			timeout = nil
 		end, delay)
 	end, function()
-		if timeout ~= 0 and timeout == timeout and timeout ~= "" and timeout then
+		if timeout then
 			clearTimeout(timeout)
 		end
 		timeout = nil
@@ -312,7 +312,7 @@ bridge = {
 			local patchQueue = {}
 			local cleanups = {}
 			local checkAndRetrySync = function()
-				if retryTimeout ~= 0 and retryTimeout == retryTimeout and retryTimeout ~= "" and retryTimeout then
+				if retryTimeout then
 					retryTimeout = clearTimeout(retryTimeout)
 				end
 				-- If versions are mismatched and not currently syncing, try again
@@ -338,7 +338,7 @@ bridge = {
 				end
 				locked = true
 				-- Clear any existing timeout
-				if lockTimeout ~= 0 and lockTimeout == lockTimeout and lockTimeout ~= "" and lockTimeout then
+				if lockTimeout then
 					clearTimeout(lockTimeout)
 				end
 				-- Set a timeout to automatically unlock after 30 seconds
@@ -353,7 +353,7 @@ bridge = {
 				return true
 			end)
 			local unlock = newFn("unlock", function()
-				if lockTimeout ~= 0 and lockTimeout == lockTimeout and lockTimeout ~= "" and lockTimeout then
+				if lockTimeout then
 					lockTimeout = clearTimeout(lockTimeout)
 				end
 				locked = false
@@ -441,7 +441,7 @@ bridge = {
 						-- If sending failed after retries, notify but keep the local changes
 						warn(`[BRIDGE] sync <{useKey}>: Failed to send data after 3 tries. Local changes at version {syncingVersion} not synchronized (last synced version: {context.lastSyncedVersion}). Will retry in 1 second.`)
 						-- Schedule a retry after 1 second
-						if retryTimeout ~= 0 and retryTimeout == retryTimeout and retryTimeout ~= "" and retryTimeout then
+						if retryTimeout then
 							clearTimeout(retryTimeout)
 						end
 						retryTimeout = setTimeout(checkAndRetrySync, 1000)

@@ -1,5 +1,5 @@
 import { RunService, ReplicatedStorage, Players } from "@rbxts/services";
-import { setTimeout, TimeoutSymbol, clearTimeout } from "@rbxts/jsnatives";
+import { setTimeout, clearTimeout } from "@rbxts/jsnatives";
 
 declare global {
   interface BridgeEventMap {
@@ -89,7 +89,7 @@ const syncs = new Map<string, SyncConstructor>();
 
 function throttle<T extends unknown[]>(callback: (...args: T) => void, delay?: number) {
   if (delay === undefined || delay === 0) return [callback, () => { }] as [(...args: T) => void, () => void];
-  let lastArgs: T | undefined = undefined, timeout: TimeoutSymbol | undefined = undefined;
+  let lastArgs: T | undefined = undefined, timeout: symbol | undefined = undefined;
   return [(...args: T) => {
     if (timeout) return lastArgs = args;
     lastArgs = undefined;
@@ -440,8 +440,8 @@ const bridge = {
       let locked = false,
         isFlusing = false,
         initialized = false,
-        retryTimeout: TimeoutSymbol | undefined,
-        lockTimeout: TimeoutSymbol | undefined;
+        retryTimeout: symbol | undefined,
+        lockTimeout: symbol | undefined;
 
       const key = `bridge_sync:${player.UserId}:${useKey}`,
         updateCallbacks = new Set<(ctx: SyncContext) => void>(),
