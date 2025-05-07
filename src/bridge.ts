@@ -81,8 +81,8 @@ export type SyncContext<T = unknown> = {
   onUpdated: (callback: (ctx: SyncContext<T>) => void) => () => void,
   version: number,  // Current data version 
   lastSyncedVersion: number,  // Version of last successful sync
-  cleanups: Set<() => void>,
-  player: Player
+  player: Player,
+  destroy: () => void,
 };
 export type SyncConstructor<T = unknown> = (player?: Player) => SyncContext<T>;
 const syncs = new Map<string, SyncConstructor>();
@@ -417,11 +417,7 @@ const bridge = {
     const contextMap = new WeakMap<Player, SyncContext>();
 
     Players.PlayerRemoving.Connect((player) => {
-      const context = contextMap.get(player);
-      if (context !== undefined) {
-        context.cleanups.forEach((cleanup) => cleanup());
-        contextMap.delete(player);
-      }
+      contextMap.get(player)?.destroy();
     });
 
     return ((player?: Player) => {
@@ -441,15 +437,23 @@ const bridge = {
         isFlusing = false,
         initialized = false,
         retryTimeout: symbol | undefined,
-        lockTimeout: symbol | undefined;
+        lockTimeout: symbol | undefined,
+        destroyed = false;
 
       const key = `bridge_sync:${player.UserId}:${useKey}`,
         updateCallbacks = new Set<(ctx: SyncContext) => void>(),
         patchQueue = [] as ((data: unknown) => unknown)[],
-        cleanups = new Set<() => void>(),
+        cleanups = new Set<() => void>([
+          () => {
+            if (lockTimeout) clearTimeout(lockTimeout);
+            if (retryTimeout) clearTimeout(retryTimeout);
+            destroyed = true;
+          }
+        ]),
 
         // Checks if we need to retry the sync, retries if needed
         checkAndRetrySync = () => {
+          if (destroyed) return;
           if (retryTimeout) retryTimeout = clearTimeout(retryTimeout) as undefined;
 
           // If versions are mismatched and not currently syncing, try again
@@ -470,7 +474,7 @@ const bridge = {
 
         // Locks the context to avoid other side to send data while flushing
         lock = newFn("lock", () => {
-          if (isFlusing) return false;
+          if (destroyed || isFlusing) return false;
           locked = true;
 
           // Clear any existing timeout
@@ -489,6 +493,7 @@ const bridge = {
 
         // Unlocks the context to allow other side to send data
         unlock = newFn("unlock", () => {
+          if (destroyed) return false;
           if (lockTimeout) lockTimeout = clearTimeout(lockTimeout) as undefined;
           locked = false;
           flush();
@@ -496,6 +501,7 @@ const bridge = {
 
         // Sends the data to the other side
         send = newFn("send", (payload) => {
+          if (destroyed) return;
           // Type checking since bridge.fn expects a different signature
           if (typeIs(payload, "table")) {
             const asTable = payload as Record<string, unknown>;
@@ -515,11 +521,11 @@ const bridge = {
         }),
 
         // Retrieves the data from the other side
-        retrieve = newFn("retrieve", () => context!.data),
+        retrieve = newFn("retrieve", () => !destroyed && context!.data),
 
         //flush function to send the data to the other side
         flush = async () => {
-          if (locked || patchQueue.size() <= 0 || !initialized) return;
+          if (locked || patchQueue.size() <= 0 || !initialized || destroyed) return;
           flushThrottleCleanup();
           isFlusing = true;
 
@@ -572,7 +578,8 @@ const bridge = {
         },
 
         // Throttles the flush function, for classic calls
-        [flushThrottle, flushThrottleCleanup] = throttle(() => flush(), throttleDelay);
+        [_flushThrottle, flushThrottleCleanup] = throttle(() => flush(), throttleDelay),
+        flushThrottle = () => !destroyed && _flushThrottle();
 
       // the main context
       context = {
@@ -598,8 +605,11 @@ const bridge = {
         },
         version: 0,
         lastSyncedVersion: 0,
-        cleanups,
-        player
+        player,
+        destroy: () => {
+          cleanups.forEach((cleanup) => cleanup());
+          contextMap.delete(player);
+        }
       };
 
       // store the context in the map
