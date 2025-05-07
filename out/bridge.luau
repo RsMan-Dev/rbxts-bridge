@@ -297,11 +297,11 @@ bridge = {
 			local retryTimeout
 			local lockTimeout
 			local destroyed = false
-			local flush, key, cleanups, updateCallbacks, patchQueue, flushThrottleCleanup, lock, send, checkAndRetrySync, unlock, _flushThrottle
+			local flushThrottleCleanup, cleanups, flush, key, updateCallbacks, patchQueue, lock, send, checkAndRetrySync, unlock, _flushThrottle
 			local key = `bridge_sync:{player.UserId}:{useKey}`
 			local updateCallbacks = {}
 			local patchQueue = {}
-			local cleanups = {
+			cleanups = {
 				[function()
 					if lockTimeout then
 						clearTimeout(lockTimeout)
@@ -309,7 +309,10 @@ bridge = {
 					if retryTimeout then
 						clearTimeout(retryTimeout)
 					end
+					flushThrottleCleanup()
 					destroyed = true
+					-- remove references in functions to help garbage collector (idk if it helps, but it doesn't hurt)
+					table.clear(cleanups)
 				end] = true,
 			}
 			local checkAndRetrySync = function()

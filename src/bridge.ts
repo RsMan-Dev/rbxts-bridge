@@ -447,7 +447,10 @@ const bridge = {
           () => {
             if (lockTimeout) clearTimeout(lockTimeout);
             if (retryTimeout) clearTimeout(retryTimeout);
+            flushThrottleCleanup();
             destroyed = true;
+            // remove references in functions to help garbage collector (idk if it helps, but it doesn't hurt)
+            cleanups.clear();
           }
         ]),
 
