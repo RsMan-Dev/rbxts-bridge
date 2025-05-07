@@ -15,8 +15,8 @@ export type SyncContext<T = unknown> = {
     onUpdated: (callback: (ctx: SyncContext<T>) => void) => () => void;
     version: number;
     lastSyncedVersion: number;
-    cleanups: Set<() => void>;
     player: Player;
+    destroy: () => void;
 };
 export type SyncConstructor<T = unknown> = (player?: Player) => SyncContext<T>;
 /**

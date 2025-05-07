@@ -271,19 +271,9 @@ bridge = {
 		})
 		Players.PlayerRemoving:Connect(function(player)
 			local _player = player
-			local context = contextMap[_player]
-			if context ~= nil then
-				local _exp = context.cleanups
-				-- ▼ ReadonlySet.forEach ▼
-				local _callback = function(cleanup)
-					return cleanup()
-				end
-				for _v in _exp do
-					_callback(_v, _v, _exp)
-				end
-				-- ▲ ReadonlySet.forEach ▲
-				local _player_1 = player
-				contextMap[_player_1] = nil
+			local _result = contextMap[_player]
+			if _result ~= nil then
+				_result.destroy()
 			end
 		end)
 		return function(player)
@@ -306,12 +296,26 @@ bridge = {
 			local initialized = false
 			local retryTimeout
 			local lockTimeout
-			local flush, key, cleanups, updateCallbacks, patchQueue, flushThrottleCleanup, lock, send, checkAndRetrySync, unlock
+			local destroyed = false
+			local flush, key, cleanups, updateCallbacks, patchQueue, flushThrottleCleanup, lock, send, checkAndRetrySync, unlock, _flushThrottle
 			local key = `bridge_sync:{player.UserId}:{useKey}`
 			local updateCallbacks = {}
 			local patchQueue = {}
-			local cleanups = {}
+			local cleanups = {
+				[function()
+					if lockTimeout then
+						clearTimeout(lockTimeout)
+					end
+					if retryTimeout then
+						clearTimeout(retryTimeout)
+					end
+					destroyed = true
+				end] = true,
+			}
 			local checkAndRetrySync = function()
+				if destroyed then
+					return nil
+				end
 				if retryTimeout then
 					retryTimeout = clearTimeout(retryTimeout)
 				end
@@ -333,7 +337,7 @@ bridge = {
 				end
 			end
 			local lock = newFn("lock", function()
-				if isFlusing then
+				if destroyed or isFlusing then
 					return false
 				end
 				locked = true
@@ -353,6 +357,9 @@ bridge = {
 				return true
 			end)
 			local unlock = newFn("unlock", function()
+				if destroyed then
+					return false
+				end
 				if lockTimeout then
 					lockTimeout = clearTimeout(lockTimeout)
 				end
@@ -360,6 +367,9 @@ bridge = {
 				flush()
 			end)
 			local send = newFn("send", function(payload)
+				if destroyed then
+					return nil
+				end
 				-- Type checking since bridge.fn expects a different signature
 				local _payload = payload
 				if type(_payload) == "table" then
@@ -390,10 +400,10 @@ bridge = {
 				end
 			end)
 			local retrieve = newFn("retrieve", function()
-				return context.data
+				return not destroyed and context.data
 			end)
 			flush = TS.async(function()
-				if locked or #patchQueue <= 0 or not initialized then
+				if locked or #patchQueue <= 0 or not initialized or destroyed then
 					return nil
 				end
 				flushThrottleCleanup()
@@ -454,8 +464,11 @@ bridge = {
 			local _binding = throttle(function()
 				return flush()
 			end, throttleDelay)
-			local flushThrottle = _binding[1]
+			local _flushThrottle = _binding[1]
 			flushThrottleCleanup = _binding[2]
+			local flushThrottle = function()
+				return not destroyed and _flushThrottle()
+			end
 			-- the main context
 			context = {
 				data = init,
@@ -497,8 +510,19 @@ bridge = {
 				end,
 				version = 0,
 				lastSyncedVersion = 0,
-				cleanups = cleanups,
 				player = player,
+				destroy = function()
+					-- ▼ ReadonlySet.forEach ▼
+					local _callback = function(cleanup)
+						return cleanup()
+					end
+					for _v in cleanups do
+						_callback(_v, _v, cleanups)
+					end
+					-- ▲ ReadonlySet.forEach ▲
+					local _player_1 = player
+					contextMap[_player_1] = nil
+				end,
 			}
 			-- store the context in the map
 			local _player_1 = player
