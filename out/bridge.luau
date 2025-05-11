@@ -7,6 +7,7 @@ local Players = _services.Players
 local _jsnatives = TS.import(script, TS.getModule(script, "@rbxts", "jsnatives").out)
 local setTimeout = _jsnatives.setTimeout
 local clearTimeout = _jsnatives.clearTimeout
+local Object = _jsnatives.Object
 -- -- TYPES --
 -- -- INSTANCES --
 local EVENT_NAME = "BridgeEvent"
@@ -34,6 +35,42 @@ local function unwrapMsg(msg)
 	if _condition then
 		return msg
 	end
+end
+local function makeDiffSerializable(data)
+	local _data = data
+	if type(_data) == "table" then
+		local dataTable = data
+		for _, key in Object.keys(dataTable) do
+			if dataTable[key] == Object.diffDeletedSymbol then
+				dataTable[key] = "$$DELETED$$"
+			else
+				local _arg0 = dataTable[key]
+				if type(_arg0) == "table" then
+					dataTable[key] = makeDiffSerializable(dataTable[key])
+				end
+			end
+		end
+		return dataTable
+	end
+	return data
+end
+local function makeSerializedDiffUsable(data)
+	local _data = data
+	if type(_data) == "table" then
+		local dataTable = data
+		for _, key in Object.keys(dataTable) do
+			if dataTable[key] == "$$DELETED$$" then
+				dataTable[key] = Object.diffDeletedSymbol
+			else
+				local _arg0 = dataTable[key]
+				if type(_arg0) == "table" then
+					dataTable[key] = makeSerializedDiffUsable(dataTable[key])
+				end
+			end
+		end
+		return dataTable
+	end
+	return data
 end
 -- -- CONNECT EVENTS --
 if RunService:IsServer() then
@@ -297,7 +334,7 @@ bridge = {
 			local retryTimeout
 			local lockTimeout
 			local destroyed = false
-			local flushThrottleCleanup, cleanups, flush, key, updateCallbacks, patchQueue, lock, send, checkAndRetrySync, unlock, _flushThrottle
+			local flushThrottleCleanup, cleanups, flush, key, updateCallbacks, patchQueue, lock, patch, checkAndRetrySync, unlock, _flushThrottle
 			local key = `bridge_sync:{player.UserId}:{useKey}`
 			local updateCallbacks = {}
 			local patchQueue = {}
@@ -369,36 +406,37 @@ bridge = {
 				locked = false
 				flush()
 			end)
-			local send = newFn("send", function(payload)
-				if destroyed then
+			local patch = newFn("patch", function(payload)
+				local _condition = destroyed
+				if not _condition then
+					local _payload = payload
+					_condition = not (type(_payload) == "table")
+				end
+				if _condition then
 					return nil
 				end
-				-- Type checking since bridge.fn expects a different signature
-				local _payload = payload
-				if type(_payload) == "table" then
-					local asTable = payload
-					local _condition = asTable.data ~= nil
-					if _condition then
-						local _version = asTable.version
-						_condition = type(_version) == "number"
-					end
-					if _condition then
-						local typedPayload = asTable
-						-- Only accept updates that have a higher version than our current state
-						-- This prevents out-of-order updates from causing issues
-						if typedPayload.version > context.version then
-							context.data = typedPayload.data
-							context.version = typedPayload.version
-							context.lastSyncedVersion = typedPayload.version
-							-- ▼ ReadonlySet.forEach ▼
-							local _callback = function(cb)
-								return cb(context)
-							end
-							for _v in updateCallbacks do
-								_callback(_v, _v, updateCallbacks)
-							end
-							-- ▲ ReadonlySet.forEach ▲
+				local asTable = payload
+				local _condition_1 = asTable.data ~= nil
+				if _condition_1 then
+					local _version = asTable.version
+					_condition_1 = type(_version) == "number"
+				end
+				if _condition_1 then
+					local typedPayload = asTable
+					-- Only accept updates that have a higher version than our current state
+					-- This prevents out-of-order updates from causing issues
+					if typedPayload.version > context.version then
+						Object.patch(context.data, makeSerializedDiffUsable(typedPayload.data), true)
+						context.version = typedPayload.version
+						context.lastSyncedVersion = typedPayload.version
+						-- ▼ ReadonlySet.forEach ▼
+						local _callback = function(cb)
+							return cb(context)
 						end
+						for _v in updateCallbacks do
+							_callback(_v, _v, updateCallbacks)
+						end
+						-- ▲ ReadonlySet.forEach ▲
 					end
 				end
 			end)
@@ -421,24 +459,26 @@ bridge = {
 					return nil
 				end
 				local syncingVersion = context.version + 1
+				local oldData = Object.dup(context.data, true)
 				for _, patch in patchQueue do
 					TS.try(function()
 						context.data = patch(context.data)
-						context.version = syncingVersion
-					end, function(_)
-						warn("[BRIDGE] sync <" .. useKey .. ">: A patch failed, data has not all patchs applied")
+					end, function(e)
+						warn("[BRIDGE] sync <" .. useKey .. ">: A patch failed, data has not all patchs applied because of error: " .. tostring(e))
 					end)
 				end
+				context.version = syncingVersion
 				table.clear(patchQueue)
+				local diff = Object.diff(context.data, oldData, true)
 				if context.version > context.lastSyncedVersion then
 					local sent = false
 					local tries = 0
 					while not sent and tries < 3 do
 						TS.try(function()
 							tries += 1
-							-- Send both the data and its version
-							TS.await(send({
-								data = context.data,
+							-- Send both diff and its version
+							TS.await(patch({
+								data = makeDiffSerializable(diff),
 								version = syncingVersion,
 							}, true))
 							--success, update the last synced version

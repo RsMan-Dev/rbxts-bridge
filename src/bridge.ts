@@ -1,5 +1,5 @@
 import { RunService, ReplicatedStorage, Players } from "@rbxts/services";
-import { setTimeout, clearTimeout } from "@rbxts/jsnatives";
+import { setTimeout, clearTimeout, Object } from "@rbxts/jsnatives";
 
 declare global {
   interface BridgeEventMap {
@@ -43,6 +43,27 @@ function unwrapMsg(msg: unknown): JsonMessage | undefined {
   }
 }
 
+function makeDiffSerializable(data: unknown) { // as a symbol reference cannot be serialized, we need to replace it with a string that can be serialized back to the original symbol
+  if (typeIs(data, "table")) {
+    const dataTable = data as Record<string, unknown>;
+    for(const key of Object.keys(dataTable))
+      if(dataTable[key] === Object.diffDeletedSymbol) dataTable[key] = "$$DELETED$$";
+      else if(typeIs(dataTable[key], "table")) dataTable[key] = makeDiffSerializable(dataTable[key]);
+    return dataTable;
+  }
+  return data;
+}
+
+function makeSerializedDiffUsable(data: unknown) { // as a string cannot be serialized back to the original symbol, we need to replace it with the original symbol
+  if (typeIs(data, "table")) {
+    const dataTable = data as Record<string, unknown>;
+    for(const key of Object.keys(dataTable)) 
+      if(dataTable[key] === "$$DELETED$$") dataTable[key] = Object.diffDeletedSymbol;
+      else if(typeIs(dataTable[key], "table")) dataTable[key] = makeSerializedDiffUsable(dataTable[key]);
+    return dataTable;
+  }
+  return data;
+}
 // -- CONNECT EVENTS --
 if (RunService.IsServer()) {
   remoteEvent.OnServerEvent.Connect((player, JsonMessage) => {
@@ -502,23 +523,21 @@ const bridge = {
           flush();
         }),
 
-        // Sends the data to the other side
-        send = newFn("send", (payload) => {
-          if (destroyed) return;
-          // Type checking since bridge.fn expects a different signature
-          if (typeIs(payload, "table")) {
-            const asTable = payload as Record<string, unknown>;
-            if (asTable.data !== undefined && typeIs(asTable.version, "number")) {
-              const typedPayload = asTable as { data: unknown, version: number };
+        // patchs the new diff to the other side
+        patch = newFn("patch", (payload) => {
+          if (destroyed || !typeIs(payload, "table")) return;
 
-              // Only accept updates that have a higher version than our current state
-              // This prevents out-of-order updates from causing issues
-              if (typedPayload.version > context!.version) {
-                context!.data = typedPayload.data;
-                context!.version = typedPayload.version;
-                context!.lastSyncedVersion = typedPayload.version;
-                updateCallbacks.forEach((cb) => cb(context!));
-              }
+          const asTable = payload as Record<string, unknown>;
+          if (asTable.data !== undefined && typeIs(asTable.version, "number")) {
+            const typedPayload = asTable as { data: unknown, version: number };
+
+            // Only accept updates that have a higher version than our current state
+            // This prevents out-of-order updates from causing issues
+            if (typedPayload.version > context!.version) {
+              Object.patch(context!.data, makeSerializedDiffUsable(typedPayload.data), true);
+              context!.version = typedPayload.version;
+              context!.lastSyncedVersion = typedPayload.version;
+              updateCallbacks.forEach((cb) => cb(context!));
             }
           }
         }),
@@ -541,23 +560,25 @@ const bridge = {
             return;
           }
 
-          const syncingVersion = context!.version + 1;
+          const syncingVersion = context!.version + 1, oldData = Object.dup(context!.data, true);
 
           for (const patch of patchQueue) try {
-            context!.data = patch(context!.data)
-            context!.version = syncingVersion; // update the version to the new value
-          } catch (_) {
-            warn("[BRIDGE] sync <" + useKey + ">: A patch failed, data has not all patchs applied")
+            context!.data = patch(context!.data);
+          } catch (e) {
+            warn("[BRIDGE] sync <" + useKey + ">: A patch failed, data has not all patchs applied because of error: " + e)
           }
+          context!.version = syncingVersion; // update the version to the new value
           patchQueue.clear();
+
+          const diff = Object.diff(context!.data, oldData, true); // get the diff between the data and the current data
 
           if (context!.version > context!.lastSyncedVersion) {
             let sent = false, tries = 0;
             while (!sent && tries < 3) {
               try {
                 tries++;
-                // Send both the data and its version
-                await send({ data: context!.data, version: syncingVersion }, true);
+                // Send both diff and its version
+                await patch({ data: makeDiffSerializable(diff), version: syncingVersion }, true);
 
                 //success, update the last synced version
                 sent = true, context!.lastSyncedVersion = syncingVersion;
